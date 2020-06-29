@@ -49,7 +49,7 @@ def GetInput(mat, lab, batch=1, grafi=None):
         min_gr = adj["graph"].min()
         adj["graph"] = adj["graph"] - min_gr
 
-        # append values to batches : id_2, lab0_1, lab1_1, lab0_2, lab1_2 (excluded first and last - id_p and graph_id)
+        # append values to batches : id_2, lab0_1, lab1_1, lab0_2, lab1_2 (excluded first and last - id_p and graph_id) 
         data_batch.append(adj.values[:, :-1])
 
         # arcMat creation

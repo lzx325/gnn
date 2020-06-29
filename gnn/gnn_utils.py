@@ -12,6 +12,7 @@ def GetInput(mat, lab, batch=1, grafi=None):
         belongs each node
     """
     # numero di batch
+    # how many graphs are in this batch
     batch_number = grafi.max() // batch   # if only one graph => grafi.max() is 0 => batch_number == 0
     # dataframe containing adjacency matrix
     dmat = pd.DataFrame(mat, columns=["id_1", "id_2"])
@@ -20,8 +21,7 @@ def GetInput(mat, lab, batch=1, grafi=None):
     # darch=pd.DataFrame(arc, columns=["arch"+str(i) for i in range(0,arc.shape[1])])
     # dataframe denoting graph belonging each node
     dgr = pd.DataFrame(grafi, columns=["graph"])
-
-    # creating input : id_p, id_c, label_p, label_c, graph_belong
+    # assemble edge features. creating input : id_p, id_c, label_p, label_c, graph_belong
     dresult = dmat
     dresult = pd.merge(dresult, dlab, left_on="id_1", right_index=True, how='left')
     dresult = pd.merge(dresult, dlab, left_on="id_2", right_index=True, how='left')
@@ -50,6 +50,8 @@ def GetInput(mat, lab, batch=1, grafi=None):
         adj["graph"] = adj["graph"] - min_gr
 
         # append values to batches : id_2, lab0_1, lab1_1, lab0_2, lab1_2 (excluded first and last - id_p and graph_id)
+        # lizx: it seems that the first is not excluded. [p_id, c_id, feature_p (multiple dims), feature_c (multiple_dims)]
+
         data_batch.append(adj.values[:, :-1])
 
         # arcMat creation
@@ -90,6 +92,10 @@ def GetInput(mat, lab, batch=1, grafi=None):
         #counting number nodes in current batch
         node_in.append(grbtc.groupby(["graph"]).size().values)
 
+    # data_batch contains list of batches like [p_id, c_id, feature_p (multiple dims), feature_c (multiple_dims)]]
+    # arcnode_batch contains list of batches of arcnode matrix (sparse)
+    # nodegraph_batch contains list of batches of nodegraph matrix
+    # node_in contains list of one-dim arrays. Each contains the number of node each graph has in this batch
     return data_batch, arcnode_batch, nodegraph_batch, node_in
 
 
@@ -232,8 +238,18 @@ def set_load_general(data_path, set_type, set_name="sub_30_15"):
 
         # compute inputs and arcnode
 
-        inp, arcnode, nodegraph, nodein = GetInput(adj, lab, 1,
-                                                           np.zeros(len(labels), dtype=int))
+        # adj: (n_edges,2) each row has a parent node index and a child node index
+        # lab: (n_nodes,2) stores the node features
+        # target: (n_nodes,) stores the ground truth class of each node
+        # labels: (n_nodes,n_classes) one-hot encoded target
+        # grafi: (n_nodes,) stores which graph each node belongs to. In this example all nodes belong to graph 0. This means that all examples are stored in different connected components of a large graph
+        inp, arcnode, nodegraph, nodein = GetInput(adj, lab, 1, np.zeros(len(labels), dtype=int))
+        # inp contains list of batches like [p_id, c_id, feature_p (feature_dims), feature_c (feature_dims)]], len(inp): n_batches
+        # arcnode contains list of batches of arcnode matrix (sparse), each of size: (n_nodes,n_edges)
+        # nodegraph contains list of batches of nodegraph matrix len(nodegraph): n_batches, nodegraph[i].shape: (n_nodes,n_graphs)
+        # nodein contains list of one-dim arrays. Each contains the number of nodes each graph has in this batch. len(nodein): n_batches
+        # labels (n_nodes,n_classes) one-hot encoded target
+        # labs (n_nodes,feature_dims) stores the node features
         return inp, arcnode, nodegraph, nodein, labels, lab
 
     except Exception as e:
@@ -263,25 +279,28 @@ def load_karate(path="data/karate-club/"):
 
 def from_EN_to_GNN(E, N):
     """
-    :param E: # E matrix - matrix of edges : [[id_p, id_c, graph_id],...]
+    :param E: # E matrix - matrix of edges : [[id_p, id_c, graph_id],...] 
+    lizx: id_p is the parental id, id_c is the child id, graph_id is which graph this edge is in
     :param N: # N matrix - [node_features, graph_id (to which the node belongs)]
+    lizx: the last column is graph_id
     :return: # L matrix - list of graph targets [tar_g_1, tar_g_2, ...]
     """
     N_full = N
     N = N[:, :-1]  # avoid graph_id
     e = E[:, :2]  # take only first tow columns => id_p, id_c
-    feat_temp = np.take(N, e, axis=0)  # take id_p and id_c  => (n_archs, 2, label_dim)
-    feat = np.reshape(feat_temp, [len(E), -1])  # (n_archs, 2*label_dim) => [[label_p, label_c], ...]
+    feat_temp = np.take(N, e, axis=0)  # take id_p and id_c  => (n_archs, 2, label_dim) # lizx: arch=edge
+    feat = np.reshape(feat_temp, [len(E), -1])  # (n_archs, 2*label_dim) => [[label_p, label_c], ...] 
     # creating input for gnn => [id_p, id_c, label_p, label_c]
-    inp = np.concatenate((E[:, 1:2], feat), axis=1)
+    inp = np.concatenate((E[:, 1:2], feat), axis=1) # lizx: (n_edges,1+2*label_dim) The features are the parental node and child node features connected
     # creating arcnode matrix, but transposed
     """
     1 1 0 0 0 0 0 
     0 0 1 1 0 0 0
     0 0 0 0 1 1 1    
 
-    """  # for the indices where to insert the ones, stack the id_p and the column id (single 1 for column)
-    arcnode = SparseMatrix(indices=np.stack((E[:, 0], np.arange(len(E))), axis=1),
+    """  
+    # for the indices where to insert the ones, stack the id_p and the column id (single 1 for column)
+    arcnode = SparseMatrix(indices=np.stack((E[:, 0], np.arange(len(E))), axis=1), # lizx: (n_nodes,n_edges) the affinity of each node to edge, if a node is in the parental position of an edge, there is a 1.
                            values=np.ones([len(E)]).astype(np.float32),
                            dense_shape=[len(N), len(E)])
 
@@ -291,9 +310,10 @@ def from_EN_to_GNN(E, N):
     g_ids = N_full[:, -1]
     g_ids = g_ids.astype(np.int32)
 
-    # creating graphnode matrix => create identity matrix get row corresponding to id of the graph
+    # creating graphnode matrix => create identity matrix (lizx: all non-zero elements are 1) get row corresponding to id of the graph
     # graphnode = np.take(np.eye(num_graphs), g_ids, axis=0).T
     # substitued with same code as before
+    # size is (n_graphs,n_nodes) stores the affinity of graph to nodes
     graphnode = SparseMatrix(indices=np.stack((g_ids, np.arange(len(g_ids))), axis=1),
                              values=np.ones([len(g_ids)]).astype(np.float32),
                              dense_shape=[num_graphs, len(N)])

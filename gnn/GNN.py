@@ -7,21 +7,21 @@ class GNN:
     def __init__(self, net,  input_dim, output_dim, state_dim, max_it=50, optimizer=tf.train.AdamOptimizer, learning_rate=0.01, threshold=0.01, graph_based=False,
                  param=str(time.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')), config=None, tensorboard=False):
         """
-               create GNN instance. Feed this parameters:
+        create GNN instance. Feed this parameters:
 
-               :net:  Net instance - it contains state network, output network, initialized weights, loss function and metric;
-               :input_dim: dimension of the input
-               :output_dim: dimension of the output
-               :state_dim: dimension for the state
-               :max_it:  maximum number of iteration of the state convergence procedure
-               :optimizer:  optimizer instance
-               :learning_rate: learning rate value
-               :threshold:  value to establish the state convergence
-               :graph_based: flag to denote a graph based problem
-               :param: name of the experiment
-               :config: ConfigProto protocol buffer object, to set configuration options for a session
-               :tensorboard:  boolean flag to activate tensorboard
-               """
+        :net:  Net instance - it contains state network, output network, initialized weights, loss function and metric;
+        :input_dim: dimension of the input
+        :output_dim: dimension of the output
+        :state_dim: dimension for the state
+        :max_it:  maximum number of iteration of the state convergence procedure
+        :optimizer:  optimizer instance
+        :learning_rate: learning rate value
+        :threshold:  value to establish the state convergence
+        :graph_based: flag to denote a graph based problem
+        :param: name of the experiment
+        :config: ConfigProto protocol buffer object, to set configuration options for a session
+        :tensorboard:  boolean flag to activate tensorboard
+        """
 
         np.random.seed(0)
         tf.set_random_seed(0)
@@ -79,6 +79,7 @@ class GNN:
 
         # loss
         with tf.variable_scope('loss'):
+            # it seems that there is no regularization term for gradients
             self.loss = self.net.Loss(self.loss_op[0], self.y)
 
             # val loss
@@ -109,24 +110,43 @@ class GNN:
 
     def convergence(self, a, state, old_state, k):
         with tf.variable_scope('Convergence'):
+            # state: (n_nodes,state_dim)
+            # old_state: (n_nodes,state_dim)
+            # gat: (n_edges,state_dim)
+            # sl: (n_edges,state_dim)
+            # inp: (n_edges,input_dim-1+state_dim)
+            # self.ArcNode: (n_nodes,n_edges)
             # body of the while cicle used to iteratively calculate state
 
             # assign current state to old state
-            old_state = state
-
+            old_state = state # the original old_state is not used
             # grub states of neighboring node
+            
+            # lizx: the code here is probably wrong, this gathers parental node states
             gat = tf.gather(old_state, tf.cast(a[:, 0], tf.int32))
 
             # slice to consider only label of the node and that of it's neighbor
             # sl = tf.slice(a, [0, 1], [tf.shape(a)[0], tf.shape(a)[1] - 1])
             # equivalent code
             sl = a[:, 1:]
+            with tf.control_dependencies([
+                tf.print("sl dim:\n",tf.shape(sl),summarize=50),
+                tf.print("gat dim:\n",tf.shape(gat),summarize=50),
+                tf.print("ArcNode dim:\n",tf.shape(self.ArcNode),summarize=50),
+                tf.print("a:\n",a,summarize=50),
+                tf.print("ArcNode:\n",self.ArcNode,summarize=50),
+            ]):
+                ass=tf.Assert(True,["assertion true"])
 
             # concat with retrieved state
-            inp = tf.concat([sl, gat], axis=1)
+            # sl is l_n and l_u in Eq.(3)
+            # gat is x_u in Eq.(3)
+            with tf.control_dependencies([ass]):
+                inp = tf.concat([sl, gat], axis=1)
 
             # evaluate next state and multiply by the arch-node conversion matrix to obtain per-node states
             layer1 = self.net.netSt(inp)
+            # Equation (3)
             state = tf.sparse_tensor_dense_matmul(self.ArcNode, layer1)
 
             # update the iteration counter
@@ -141,6 +161,7 @@ class GNN:
             # vector showing item converged or not (given a certain threshold)
             checkDistanceVec = tf.greater(outDistance, self.state_threshold)
 
+            # all states should converge
             c1 = tf.reduce_any(checkDistanceVec)
             c2 = tf.less(k, self.max_iter)
 
@@ -152,15 +173,19 @@ class GNN:
         # compute state
         with tf.variable_scope('Loop'):
             k = tf.constant(0)
+            # self.comp_inp: each row [p_id, c_id, feature_p (feature_dims), feature_c (feature_dims)]]
+            # self.state: (n_nodes,state_dim)
+            # self.state: (n_nodes,state_dim)
             res, st, old_st, num = tf.while_loop(self.condition, self.convergence,
                                                  [self.comp_inp, self.state, self.state_old, k])
             if self.tensorboard:
                 self.summ_iter = tf.summary.scalar('iteration', num, collections=['always'])
 
             if self.graph_based:
-                # stf = tf.transpose(tf.matmul(tf.transpose(st), self.NodeGraph))
+                # lizx: uncommented
+                stf = tf.transpose(tf.matmul(tf.transpose(st), self.NodeGraph))
 
-                stf = tf.sparse_tensor_dense_matmul(self.NodeGraph, st)
+                # stf = tf.sparse_tensor_dense_matmul(self.NodeGraph, st)
             else:
                 stf = st
             out = self.net.netOut(stf)
@@ -175,8 +200,10 @@ class GNN:
         arcnode_ = tf.SparseTensorValue(indices=ArcNode.indices, values=ArcNode.values,
                                         dense_shape=ArcNode.dense_shape)
         if self.graph_based:
-            nodegraph = tf.SparseTensorValue(indices=nodegraph.indices, values=nodegraph.values,
-                                        dense_shape=nodegraph.dense_shape)
+            # lizx changed:
+            indices1,indices2=nodegraph.nonzero()
+            nodegraph = tf.SparseTensorValue(indices=np.stack([indices1,indices2],axis=1), values=nodegraph[indices1,indices2],
+                                        dense_shape=nodegraph.shape)
 
         fd = {self.NodeGraph: nodegraph, self.comp_inp: inputs, self.state: np.zeros((ArcNode.dense_shape[0], self.state_dim)),
               self.state_old: np.ones((ArcNode.dense_shape[0], self.state_dim)),

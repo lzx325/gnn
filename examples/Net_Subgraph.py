@@ -31,7 +31,6 @@ class Net:
 
     def netSt(self, inp):
         with tf.variable_scope('State_net'):
-
             layer1 = tf.layers.dense(inp, self.state_l1, activation=tf.nn.sigmoid)
             layer2 = tf.layers.dense(layer1, self.state_l2, activation=tf.nn.sigmoid)
 
@@ -39,10 +38,10 @@ class Net:
 
     def netOut(self, inp):
 
-            layer1 = tf.layers.dense(inp, self.output_l1, activation=tf.nn.sigmoid)
-            layer2 = tf.layers.dense(layer1, self.output_l2, activation=tf.nn.softmax)
+        layer1 = tf.layers.dense(inp, self.output_l1, activation=tf.nn.sigmoid)
+        layer2 = tf.layers.dense(layer1, self.output_l2, activation=tf.nn.softmax)
 
-            return layer2
+        return layer2
 
     def Loss(self, output, target, output_weight=None):
         # method to define the loss function
