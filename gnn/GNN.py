@@ -143,20 +143,23 @@ class GNN:
 
             # old wrong code: sl = a[:, 1:]
             sl=a[:,2:]
-            with tf.control_dependencies([
-                tf.print("sl dim:\n",tf.shape(sl),summarize=50),
-                tf.print("gat dim:\n",tf.shape(gat),summarize=50),
-                tf.print("ArcNode dim:\n",tf.shape(self.ArcNode),summarize=50),
-                tf.print("a:\n",a,summarize=50),
-                tf.print("ArcNode:\n",self.ArcNode,summarize=50),
-            ]):
-                ass=tf.Assert(True,["assertion true"])
+            #  lizx: print shapes
+            # with tf.control_dependencies([
+            #     tf.print("sl dim:\n",tf.shape(sl),summarize=50),
+            #     tf.print("gat dim:\n",tf.shape(gat),summarize=50),
+            #     tf.print("ArcNode dim:\n",tf.shape(self.ArcNode),summarize=50),
+            #     tf.print("a:\n",a,summarize=50),
+            #     tf.print("ArcNode:\n",self.ArcNode,summarize=50),
+            # ]):
+            #     ass=tf.Assert(True,["assertion true"])
 
             # concat with retrieved state
             # sl is l_n and l_u in Eq.(3)
             # gat is x_u in Eq.(3)
-            with tf.control_dependencies([ass]):
-                inp = tf.concat([sl, gat], axis=1)
+            # with tf.control_dependencies([ass]):
+            #     inp = tf.concat([sl, gat], axis=1)
+            inp = tf.concat([sl, gat], axis=1)
+
 
             # evaluate next state and multiply by the arch-node conversion matrix to obtain per-node states
             layer1 = self.net.netSt(inp)
